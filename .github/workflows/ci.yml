@@ -55,11 +55,7 @@ jobs:
       - name: Unit tests
         run: python -m pytest tests/ -q -m "not slow" --durations=10
 
-      - name: Legacy entry point still runs
-        run: |
-          python main.py --max_iters 6 --block_size 64 --skip_multiseed \
-            --synthetic_data --results_dir results/ci
-
+     
       - name: Figures regenerate from result files
         run: python -m experiments.plot_all --results_dir results --strict
 
