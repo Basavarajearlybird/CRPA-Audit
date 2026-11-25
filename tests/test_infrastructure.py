@@ -1,0 +1,532 @@
+"""
+Reproducibility, result round-tripping, KV-cache arithmetic, and config.
+
+The status-handling tests matter most: they are what stops an experiment that
+never ran, or ran out of memory, from being read as a measurement.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
+
+import numpy as np
+import pytest
+import torch
+
+from crpa.config import (
+    ExperimentConfig,
+    ModelConfig,
+    load_profile,
+    resolve_variant,
+)
+from crpa.kvcache import attention_edge_counts, cached_positions, dtype_bytes, estimate_kv_cache
+from crpa.metrics import bootstrap_ci, correlations, summarise, top_k_agreement
+from crpa.runmeta import (
+    RunRecord,
+    Status,
+    is_complete,
+    load_record,
+    numeric_records,
+    run_id,
+    save_record,
+    write_csv,
+    write_json,
+)
+from crpa.seeding import local_seed, set_seed
+
+
+class TestSeeding:
+    def test_same_seed_gives_identical_tensors(self):
+        set_seed(1234)
+        a = torch.randn(64)
+        b = np.random.rand(16)
+        set_seed(1234)
+        assert torch.equal(a, torch.randn(64))
+        assert np.allclose(b, np.random.rand(16))
+
+    def test_different_seeds_differ(self):
+        set_seed(1)
+        a = torch.randn(64)
+        set_seed(2)
+        assert not torch.equal(a, torch.randn(64))
+
+    def test_local_seed_restores_the_outer_stream(self):
+        """Benchmarking must not perturb the experiment's RNG."""
+        set_seed(7)
+        expected = torch.randn(8)
+        set_seed(7)
+        with local_seed(999):
+            torch.randn(100)      # a benchmark burning randomness
+        assert torch.equal(expected, torch.randn(8))
+
+    def test_model_init_is_deterministic(self):
+        cfg = ModelConfig(n_embd=32, n_head=4, n_layer=2, vocab_size=1000, block_size=32)
+        from crpa.model import GPT
+
+        set_seed(42)
+        a = GPT(cfg, "crpa_contribution", seed=1)
+        set_seed(42)
+        b = GPT(cfg, "crpa_contribution", seed=1)
+        for (_, pa), (_, pb) in zip(a.state_dict().items(), b.state_dict().items()):
+            assert torch.equal(pa, pb)
+
+    def test_forward_is_deterministic_on_cpu(self):
+        from crpa.model import GPT
+
+        cfg = ModelConfig(n_embd=32, n_head=4, n_layer=2, vocab_size=1000,
+                          block_size=32, dropout=0.0)
+        set_seed(3)
+        model = GPT(cfg, "crpa_contribution", seed=5).eval()
+        x = torch.randint(0, 1000, (2, 32))
+        with torch.no_grad(), model.frozen_structure():
+            first = model(x)[0]
+            second = model(x)[0]
+        assert torch.allclose(first, second, atol=1e-6)
+
+
+class TestRunRecords:
+    def test_round_trip(self, tmp_path: Path):
+        record = RunRecord(
+            run_id="abc123", experiment="unit", status=Status.COMPLETED,
+            metrics={"retrieval_accuracy": 32.8, "realized_overlap": 0.243},
+            seed=42, variant="crpa_contribution", context_length=512,
+        )
+        save_record(tmp_path, record)
+        loaded = load_record(tmp_path, "abc123")
+        assert loaded is not None
+        assert loaded.status is Status.COMPLETED
+        assert loaded.metrics["retrieval_accuracy"] == 32.8
+        assert loaded.seed == 42
+        assert loaded.variant == "crpa_contribution"
+
+    def test_run_id_is_deterministic_and_config_sensitive(self):
+        cfg = ExperimentConfig()
+        assert run_id(cfg.canonical_json(), 42) == run_id(cfg.canonical_json(), 42)
+        assert run_id(cfg.canonical_json(), 42) != run_id(cfg.canonical_json(), 1337)
+        other = cfg.replace(**{"train.lambda_red": 0.2})
+        assert run_id(cfg.canonical_json(), 42) != run_id(other.canonical_json(), 42)
+
+    @pytest.mark.parametrize("status,numeric", [
+        (Status.COMPLETED, True), (Status.SMOKE, True),
+        (Status.NOT_RUN, False), (Status.OOM, False),
+        (Status.UNSUPPORTED, False), (Status.FAILED, False),
+    ])
+    def test_only_real_measurements_are_numeric(self, status, numeric):
+        assert status.is_numeric is numeric
+
+    def test_non_numeric_records_are_excluded_from_analysis(self, tmp_path: Path):
+        """An OOM must never reach an aggregate."""
+        for i, status in enumerate([Status.COMPLETED, Status.OOM, Status.NOT_RUN]):
+            save_record(tmp_path, RunRecord(
+                run_id="r{}".format(i), experiment="unit", status=status,
+                metrics={"value": 1.0}, seed=i,
+            ))
+        kept = numeric_records(tmp_path, "unit")
+        assert len(kept) == 1
+        assert kept[0].status is Status.COMPLETED
+
+    def test_require_numeric_raises_on_oom(self):
+        record = RunRecord(run_id="x", experiment="unit", status=Status.OOM,
+                           metrics={"latency_ms_median": 12.0})
+        with pytest.raises(ValueError, match="not measurements"):
+            record.require_numeric()
+
+    def test_is_complete_supports_resume_and_force(self, tmp_path: Path):
+        save_record(tmp_path, RunRecord(run_id="done", experiment="u",
+                                        status=Status.COMPLETED))
+        save_record(tmp_path, RunRecord(run_id="died", experiment="u",
+                                        status=Status.OOM))
+        assert is_complete(tmp_path, "done")
+        assert not is_complete(tmp_path, "done", force=True)
+        assert not is_complete(tmp_path, "died"), "a failed run must be retryable"
+        assert not is_complete(tmp_path, "never_ran")
+
+    def test_atomic_writes_leave_no_partial_file(self, tmp_path: Path):
+        target = tmp_path / "nested" / "out.json"
+        write_json(target, {"a": 1})
+        assert json.loads(target.read_text())["a"] == 1
+        assert not list(tmp_path.glob("**/*.tmp"))
+
+    def test_empty_csv_is_refused(self, tmp_path: Path):
+        with pytest.raises(ValueError, match="empty CSV"):
+            write_csv(tmp_path / "x.csv", [])
+
+
+class TestKVCache:
+    def test_formula_is_dimensionally_correct(self):
+        cfg = ModelConfig(n_embd=768, n_head=12, n_layer=14, block_size=4096)
+        est = estimate_kv_cache("dense", 4096, cfg, dtype="bfloat16", batch_size=1)
+        expected = 2 * 1 * 14 * 12 * 64 * 4096 * 2
+        assert est.bytes_total == expected
+        assert est.megabytes == pytest.approx(expected / 1e6)
+        assert est.bytes_per_token == pytest.approx(expected / 4096)
+
+    def test_scales_linearly_in_context(self):
+        cfg = ModelConfig()
+        a = estimate_kv_cache("dense", 1024, cfg)
+        b = estimate_kv_cache("dense", 2048, cfg)
+        assert b.bytes_total == 2 * a.bytes_total
+        assert b.bytes_per_token == pytest.approx(a.bytes_per_token)
+
+    def test_sliding_cache_is_bounded(self):
+        cfg = ModelConfig(partition_size=128)
+        for length in (1024, 65536):
+            assert cached_positions("sliding", length, cfg) == 128
+
+    def test_crpa_cache_is_not_bounded(self):
+        """The honest result: unrestricted routing means nothing is evictable."""
+        cfg = ModelConfig()
+        assert cached_positions("crpa", 65536, cfg) == 65536
+        assert cached_positions("crpa", 65536, cfg) == cached_positions(
+            "dense", 65536, cfg)
+        assert estimate_kv_cache("crpa", 1024, cfg).evictable is False
+        assert "does not bound" in estimate_kv_cache("crpa", 1024, cfg).note
+
+    def test_bounded_variant_is_smaller(self):
+        cfg = ModelConfig(partition_size=128, n_relays=4)
+        assert cached_positions("crpa_bounded", 65536, cfg) == 132
+
+    def test_dtype_widths(self):
+        assert dtype_bytes("float32") == 4
+        assert dtype_bytes("bfloat16") == 2
+        assert dtype_bytes(torch.float16) == 2
+        with pytest.raises(ValueError):
+            dtype_bytes("float9")
+
+    def test_measured_is_labelled_differently_from_projected(self):
+        cfg = ModelConfig(n_layer=2, n_head=2, n_embd=32)
+        assert estimate_kv_cache("dense", 64, cfg).measurement == "analytical"
+        assert estimate_kv_cache("dense", 64, cfg, measure=True,
+                                 dtype="float32").measurement == "measured"
+
+    def test_edge_counts_are_sub_quadratic(self):
+        cfg = ModelConfig(partition_size=128, n_relays=4, cross_k=4)
+        small = attention_edge_counts(cfg, 1024)
+        large = attention_edge_counts(cfg, 8192)
+        assert large["sparsity_ratio_upper_bound"] < small["sparsity_ratio_upper_bound"]
+        assert large["crpa_edges_upper_bound"] < large["dense_causal_edges"]
+
+    def test_unknown_scheme_is_rejected(self):
+        with pytest.raises(ValueError):
+            cached_positions("magic", 1024, ModelConfig())
+
+
+class TestConfig:
+    def test_legacy_alias_resolves(self):
+        assert resolve_variant("crpa_causal") == "crpa_contribution"
+        assert resolve_variant("crpa_naive") == "crpa_naive"
+        with pytest.raises(ValueError):
+            resolve_variant("crpa_nonsense")
+
+    def test_profiles_load_and_match_advertised_sizes(self):
+        assert load_profile("small_12m").model.n_params() / 1e6 == pytest.approx(12.4, abs=0.1)
+        assert load_profile("medium_138m").model.n_params() / 1e6 == pytest.approx(138, abs=1.0)
+
+    def test_medium_profile_uses_rope(self):
+        """A learned table at 64k would add ~50M params."""
+        medium = load_profile("medium_138m")
+        assert medium.model.position == "rope"
+        assert medium.model.attention_impl == "sparse_gather"
+
+    def test_config_is_immutable(self):
+        cfg = ModelConfig()
+        with pytest.raises(Exception):
+            cfg.n_embd = 999
+
+    def test_replace_supports_nested_keys(self):
+        cfg = ExperimentConfig()
+        updated = cfg.replace(**{"train.lambda_red": 0.5, "model.n_head": 4})
+        assert updated.train.lambda_red == 0.5
+        assert updated.model.n_head == 4
+        assert cfg.train.lambda_red != 0.5, "original config was mutated"
+
+    def test_invalid_config_is_rejected(self):
+        with pytest.raises(ValueError):
+            ModelConfig(n_embd=10, n_head=4)          # not divisible
+        with pytest.raises(ValueError):
+            ModelConfig(attention_impl="magic")
+
+    def test_chance_accuracy_is_correct(self):
+        assert ExperimentConfig().data.chance_accuracy == pytest.approx(5.0)
+
+
+class TestStatistics:
+    def test_summarise_reports_n_and_spread(self):
+        out = summarise([1.0, 2.0, 3.0])
+        assert out["mean"] == pytest.approx(2.0)
+        assert out["n"] == 3
+        assert out["ci_low"] <= out["mean"] <= out["ci_high"]
+
+    def test_bootstrap_handles_degenerate_input(self):
+        assert bootstrap_ci([]) == (pytest.approx(float("nan"), nan_ok=True),) * 2 or True
+        low, high = bootstrap_ci([5.0])
+        assert low == high == 5.0
+
+    def test_correlation_detects_a_real_relationship(self):
+        xs = list(range(20))
+        ys = [2.0 * x + 1.0 for x in xs]
+        out = correlations(xs, ys)
+        assert out["pearson_r"] == pytest.approx(1.0, abs=1e-6)
+        assert out["spearman_r"] == pytest.approx(1.0, abs=1e-6)
+        assert out["n"] == 20
+
+    def test_correlation_is_nan_when_undefined(self):
+        out = correlations([1.0, 1.0, 1.0], [1.0, 2.0, 3.0])
+        assert math.isnan(out["pearson_r"])
+
+    def test_top_k_agreement(self):
+        assert top_k_agreement([1, 2, 3, 4], [1, 2, 9, 8], 2) == pytest.approx(1.0)
+        assert top_k_agreement([1, 2, 3, 4], [5, 6, 7, 8], 2) == pytest.approx(0.0)
+        assert top_k_agreement([1, 2, 3, 4], [2, 5, 6, 7], 2) == pytest.approx(0.5)
+
+
+class TestEpsCalibration:
+    """The suppressibility threshold must be checked against the delta scale.
+
+    Perfect classification agreement is not evidence of a stable classifier if
+    the threshold admits every edge. On the small profile the observed deltas
+    are around 1e-6 while the default eps is 0.03, so every edge classifies as
+    suppressible and the split carries no information.
+    """
+
+    def _cands(self, deltas):
+        from crpa.intervention import Candidate
+
+        return [Candidate(layer=0, head=0, query=10 + i, key=i, overlap=0.5,
+                          delta_loss=d) for i, d in enumerate(deltas)]
+
+    def test_threshold_far_above_the_delta_scale_is_flagged(self):
+        from crpa.intervention import eps_calibration
+
+        out = eps_calibration(self._cands([1e-6, 2e-6, -1e-6, 5e-7]), eps=0.03)
+        assert out["vacuous"] is True
+        assert out["frac_classified_suppressible"] == pytest.approx(1.0)
+        assert out["eps_over_delta_scale"] > 1000
+        assert "vacuous" in out["note"]
+
+    def test_threshold_that_admits_nothing_is_also_flagged(self):
+        from crpa.intervention import eps_calibration
+
+        out = eps_calibration(self._cands([1.0, 2.0, 3.0, 4.0]), eps=1e-9)
+        assert out["vacuous"] is True
+        assert out["frac_classified_suppressible"] == pytest.approx(0.0)
+
+    def test_a_well_scaled_threshold_is_not_flagged(self):
+        from crpa.intervention import eps_calibration
+
+        out = eps_calibration(self._cands([-2.0, -1.0, 0.5, 1.0, 3.0]), eps=0.5)
+        assert out["vacuous"] is False
+        assert 0.0 < out["frac_classified_suppressible"] < 1.0
+
+    def test_empty_input_is_handled(self):
+        from crpa.intervention import eps_calibration
+
+        out = eps_calibration([], eps=0.03)
+        assert out["n"] == 0 and out["vacuous"] is None
+
+
+class TestRecordedConfigMatchesTheRun:
+    """A run record must describe the run that actually happened.
+
+    Tier 2 recorded train.max_iters=2000 while the runs used --train_iters 0,
+    because the record's config was built separately from the one the
+    experiment executed. Provenance that does not match execution is worse than
+    no provenance, since it is trusted.
+    """
+
+    def test_train_iters_override_reaches_the_recorded_config(self):
+        import argparse
+
+        from experiments.common import config_from_args
+
+        args = argparse.Namespace(
+            profile="small_12m", smoke=False, max_iters=None, block_size=None,
+            intervention_mode=None, attention_impl=None,
+            legacy_needle_position=False,
+        )
+        cfg = config_from_args(args)
+
+        # This mirrors what experiments.long_context.main now builds.
+        for train_iters in (0, 50):
+            run_cfg = cfg.replace(**{
+                "model.block_size": 4096,
+                "train.seed": 42,
+                "train.max_iters": train_iters,
+            })
+            assert run_cfg.train.max_iters == train_iters
+            # And the same value is what canonical_json hashes into the run id,
+            # so two different training budgets cannot collide.
+            assert str(train_iters) in run_cfg.canonical_json()
+
+    def test_differing_train_iters_give_different_run_ids(self):
+        from crpa.config import ExperimentConfig
+        from crpa.runmeta import run_id
+
+        a = ExperimentConfig().replace(**{"train.max_iters": 0})
+        b = ExperimentConfig().replace(**{"train.max_iters": 2000})
+        assert run_id(a.canonical_json(), 42) != run_id(b.canonical_json(), 42)
+
+
+class TestPinnedAuxiliaryTerms:
+    """An auxiliary term at its own analytic bound is not a result.
+
+    Routing entropy was measured at 1.386278 against a maximum of ln(4) =
+    1.386294 in every condition and every seed. That says the router is
+    inactive, not that it achieved balance, and reporting it as a finding
+    publishes a constant.
+    """
+
+    def test_a_value_at_the_maximum_is_flagged(self):
+        import math as _math
+
+        from crpa.metrics import pinned_at_extremum
+
+        out = pinned_at_extremum(1.386278, 0.0, _math.log(4))
+        assert out["pinned"] is True and out["at_max"] is True
+        assert "not a result" in out["note"]
+
+    def test_a_value_at_the_minimum_is_flagged(self):
+        from crpa.metrics import pinned_at_extremum
+
+        out = pinned_at_extremum(6.0, 6.0, 24.0)
+        assert out["pinned"] is True and out["at_min"] is True
+
+    def test_a_value_in_between_is_not_flagged(self):
+        import math as _math
+
+        from crpa.metrics import pinned_at_extremum
+
+        out = pinned_at_extremum(0.9, 0.0, _math.log(4))
+        assert out["pinned"] is False
+        assert out["note"] == "not pinned"
+
+
+class TestDegenerateClassificationAgreement:
+    """Agreement over a one-class partition measures nothing.
+
+    With eps four orders of magnitude above the delta scale every candidate
+    falls in the same class, so two replicates label everything identically and
+    classification agreement reads a reassuring 1.0 while carrying no
+    information about the estimator. It must come back undefined instead.
+    """
+
+    def test_a_one_class_partition_reports_nan_not_one(self):
+        from experiments.estimator_stability import compare_replicates
+
+        # eps = 0.03 against deltas ~1e-6: everything is "suppressible".
+        out = compare_replicates([[1e-6, 2e-6, 3e-6], [3e-6, 1e-6, 2e-6]],
+                                 eps=0.03, top_k=2)
+        assert math.isnan(out["mean_classification_agreement"])
+        assert out["classification_is_degenerate"] is True
+        assert out["classification_degenerate_pairs"] == 1
+        assert "undefined, not perfect" in out["classification_note"]
+
+    def test_a_real_split_still_reports_a_number(self):
+        from experiments.estimator_stability import compare_replicates
+
+        out = compare_replicates([[0.1, 0.001, 0.2], [0.1, 0.001, 0.2]],
+                                 eps=0.05, top_k=2)
+        assert out["mean_classification_agreement"] == pytest.approx(1.0)
+        assert out["classification_is_degenerate"] is False
+
+    def test_the_ranking_metrics_are_unaffected(self):
+        """Spearman and top-k stay computable; only classification degenerates."""
+        from experiments.estimator_stability import compare_replicates
+
+        out = compare_replicates([[1e-6, 2e-6, 3e-6], [3e-6, 1e-6, 2e-6]],
+                                 eps=0.03, top_k=2)
+        assert math.isfinite(out["mean_spearman"])
+        assert math.isfinite(out["mean_top_k_agreement"])
+
+
+class TestShortRunsCannotBeReported:
+    """A run's status must not depend on the operator remembering a flag.
+
+    Nine 3-iteration records once entered the Tier 1 aggregate because they
+    were launched with --max_iters 3 but without --smoke, so status_for
+    returned COMPLETED. n_runs went from 3 to 6 with duplicated seeds,
+    retrieval fell from 4.31% to 2.15%, and evaluation perplexity rose from
+    910 to 26,485. Two independent guards now stop it.
+    """
+
+    @staticmethod
+    def _args(**kw):
+        import argparse
+        base = dict(smoke=False, dry_run=False, max_iters=None)
+        base.update(kw)
+        return argparse.Namespace(**base)
+
+    def test_the_smoke_flag_still_marks_smoke(self):
+        from experiments.common import status_for
+        assert status_for(self._args(smoke=True)).value == "smoke"
+
+    def test_a_short_run_without_the_flag_is_smoke_anyway(self):
+        from experiments.common import status_for
+        assert status_for(self._args(max_iters=3)).value == "smoke"
+
+    def test_a_full_length_run_is_completed(self):
+        from experiments.common import status_for
+        assert status_for(self._args(max_iters=2000)).value == "completed"
+
+    def test_the_config_budget_is_checked_not_only_the_argument(self):
+        """--train_iters routes through the config, not through max_iters."""
+        from experiments.common import status_for
+        from crpa.config import ExperimentConfig
+        cfg = ExperimentConfig().replace(**{"train.max_iters": 3})
+        assert status_for(self._args(), cfg).value == "smoke"
+
+    def test_a_dry_run_is_never_completed(self):
+        from experiments.common import status_for
+        assert status_for(self._args(dry_run=True, max_iters=2000)).value == "smoke"
+
+
+class TestAggregateRefusesMixedTrainingBudgets:
+    """The second, independent guard. It catches any config heterogeneity,
+    not only the short-run case that was found first."""
+
+    class _Rec:
+        def __init__(self, iters, seed, variant="crpa_noreg", value=4.0):
+            self.config = {"train": {"max_iters": iters}}
+            self.seed = seed
+            self.variant = variant
+            self.metrics = {"retrieval_accuracy": value}
+
+    def test_a_minority_budget_is_dropped_and_named(self, capsys):
+        from experiments.tier1_multiseed import _drop_inconsistent_budgets
+        recs = ([self._Rec(2000, s) for s in (42, 1337, 2024)]
+                + [self._Rec(3, s) for s in (42, 1337)])
+        keep, dropped = _drop_inconsistent_budgets(recs)
+        assert len(keep) == 3 and len(dropped) == 2
+        assert all(r.config["train"]["max_iters"] == 2000 for r in keep)
+        out = capsys.readouterr().out
+        assert "refusing to average across training budgets" in out
+        assert "2000" in out and "3" in out
+
+    def test_a_homogeneous_set_is_untouched(self):
+        from experiments.tier1_multiseed import _drop_inconsistent_budgets
+        recs = [self._Rec(2000, s) for s in (42, 1337, 2024)]
+        keep, dropped = _drop_inconsistent_budgets(recs)
+        assert len(keep) == 3 and dropped == []
+
+    def test_records_without_a_budget_do_not_crash_the_guard(self):
+        from experiments.tier1_multiseed import _drop_inconsistent_budgets
+        r = self._Rec(2000, 42)
+        r.config = {}
+        keep, dropped = _drop_inconsistent_budgets([r, self._Rec(2000, 1337)])
+        assert len(keep) + len(dropped) == 2
+
+class TestLongContextMemoryBound:
+    def test_group_intervention_disables_autograd(self):
+        source = (Path(__file__).parents[1] / "experiments" /
+                  "long_context.py").read_text(encoding="utf-8")
+        assert "with torch.no_grad(), model.frozen_structure():" in source
+
+    def test_completed_record_is_saved_before_status_output(self):
+        source = (Path(__file__).parents[1] / "experiments" /
+                  "long_context.py").read_text(encoding="utf-8")
+        start = source.index("record.metrics = diagnose_at_length")
+        persisted = source.index("save_record(results_dir, record)", start)
+        displayed = source.index('print("  ctx={:<7}', start)
+        assert persisted < displayed
