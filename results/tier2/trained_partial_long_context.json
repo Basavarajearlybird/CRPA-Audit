@@ -1,0 +1,190 @@
+{
+  "experiment": "long_context",
+  "environment": {
+    "hostname": "8c7b871b00ff",
+    "platform": "Linux-6.5.0-35-generic-x86_64-with-glibc2.35",
+    "python": "3.11.10",
+    "torch": "2.4.1+cu124",
+    "cuda": "12.4",
+    "cudnn": 90100,
+    "gpu": {
+      "available": true,
+      "name": "NVIDIA A100 80GB PCIe",
+      "count": 1,
+      "total_memory_gb": 84.97,
+      "capability": "8.0"
+    },
+    "cpu_count": 64
+  },
+  "context_lengths_requested": [
+    65536
+  ],
+  "rows": [
+    {
+      "seed": 42,
+      "status": "completed",
+      "context_length": 4096,
+      "n_candidates_scored": 24,
+      "probs_window": 1024,
+      "retrieval_accuracy": 0.0,
+      "realized_overlap": 0.23232803898175394,
+      "delta_mean": -3.9736429850260414e-08,
+      "delta_std": 1.9056922289978343e-07,
+      "delta_p50": 0.0,
+      "delta_p90": 0.0,
+      "delta_max": 0.0,
+      "single_edge_deltas_all_zero": false,
+      "group_delta": 9.5367431640625e-07,
+      "group_n_edges": 24,
+      "group_n_removed": 24,
+      "float32_resolution_estimate": 1.3199999999999999e-06,
+      "ranking_stability_spearman": 1.0,
+      "frac_high_overlap_low_contribution": 0.25,
+      "frac_high_overlap_high_contribution": 0.25,
+      "theoretical_causal_edges": 8390656,
+      "actual_edges": 1189699.857142857,
+      "sparsity_ratio": 0.14178865837699187,
+      "edge_count_is_upper_bound": false,
+      "dense_causal_edges": 8390656.0,
+      "crpa_edges_upper_bound": 2392064,
+      "sparsity_ratio_upper_bound": 0.28508664876739076,
+      "edges_per_query": 552
+    },
+    {
+      "seed": 42,
+      "status": "completed",
+      "context_length": 8192,
+      "n_candidates_scored": 24,
+      "probs_window": 1024,
+      "retrieval_accuracy": 0.0,
+      "realized_overlap": 0.23553591633107004,
+      "delta_mean": 0.0,
+      "delta_std": 0.0,
+      "delta_p50": 0.0,
+      "delta_p90": 0.0,
+      "delta_max": 0.0,
+      "single_edge_deltas_all_zero": true,
+      "group_delta": 9.5367431640625e-07,
+      "group_n_edges": 24,
+      "group_n_removed": 24,
+      "float32_resolution_estimate": 1.3199999999999999e-06,
+      "ranking_stability_spearman": NaN,
+      "frac_high_overlap_low_contribution": 0.25,
+      "frac_high_overlap_high_contribution": 0.25,
+      "theoretical_causal_edges": 33558528,
+      "actual_edges": 2402865.714285714,
+      "sparsity_ratio": 0.07160223816389426,
+      "edge_count_is_upper_bound": false,
+      "dense_causal_edges": 33558528.0,
+      "crpa_edges_upper_bound": 4784128,
+      "sparsity_ratio_upper_bound": 0.1425607225680459,
+      "edges_per_query": 552
+    },
+    {
+      "seed": 42,
+      "status": "oom",
+      "context_length": 16384
+    },
+    {
+      "seed": 42,
+      "status": "oom",
+      "context_length": 32768
+    },
+    {
+      "seed": 42,
+      "status": "oom",
+      "context_length": 32768
+    },
+    {
+      "seed": 42,
+      "status": "oom",
+      "context_length": 32768
+    },
+    {
+      "seed": 42,
+      "status": "oom",
+      "context_length": 65536
+    },
+    {
+      "seed": 42,
+      "status": "oom",
+      "context_length": 65536
+    },
+    {
+      "seed": 42,
+      "status": "oom",
+      "context_length": 65536
+    }
+  ],
+  "kv_cache": [
+    {
+      "scheme": "dense",
+      "context_length": 65536,
+      "cached_positions": 65536,
+      "bytes_total": 2818572288,
+      "bytes_per_token": 43008.0,
+      "megabytes": 2818.572288,
+      "gigabytes": 2.818572288,
+      "measurement": "analytical",
+      "dtype": "bfloat16",
+      "batch_size": 1,
+      "n_layer": 14,
+      "n_head": 12,
+      "d_head": 64,
+      "evictable": false,
+      "note": ""
+    },
+    {
+      "scheme": "sliding",
+      "context_length": 65536,
+      "cached_positions": 512,
+      "bytes_total": 22020096,
+      "bytes_per_token": 336.0,
+      "megabytes": 22.020096,
+      "gigabytes": 0.022020096,
+      "measurement": "analytical",
+      "dtype": "bfloat16",
+      "batch_size": 1,
+      "n_layer": 14,
+      "n_head": 12,
+      "d_head": 64,
+      "evictable": true,
+      "note": ""
+    },
+    {
+      "scheme": "crpa",
+      "context_length": 65536,
+      "cached_positions": 65536,
+      "bytes_total": 2818572288,
+      "bytes_per_token": 43008.0,
+      "megabytes": 2818.572288,
+      "gigabytes": 2.818572288,
+      "measurement": "analytical",
+      "dtype": "bfloat16",
+      "batch_size": 1,
+      "n_layer": 14,
+      "n_head": 12,
+      "d_head": 64,
+      "evictable": false,
+      "note": "CRPA does not bound the KV cache: routed keys C_k(i) may reference any earlier position, so no entry is provably evictable. Compare with crpa_bounded, which drops routing to gain a bounded cache."
+    },
+    {
+      "scheme": "crpa_bounded",
+      "context_length": 65536,
+      "cached_positions": 544,
+      "bytes_total": 23396352,
+      "bytes_per_token": 357.0,
+      "megabytes": 23.396352,
+      "gigabytes": 0.023396352,
+      "measurement": "analytical",
+      "dtype": "bfloat16",
+      "batch_size": 1,
+      "n_layer": 14,
+      "n_head": 12,
+      "d_head": 64,
+      "evictable": true,
+      "note": "Hypothetical variant without cross-partition routing. Bounded cache, but it gives up the mechanism CRPA relies on for long-range retrieval."
+    }
+  ],
+  "note": "Rows with status 'oom' carry no metrics. Context lengths absent from this file were not attempted and must be reported as not run."
+}
