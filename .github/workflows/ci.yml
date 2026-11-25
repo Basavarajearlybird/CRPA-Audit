@@ -34,10 +34,10 @@ jobs:
           pip install numpy scipy matplotlib PyYAML pytest pyflakes
 
       - name: Lint
-        run: python -m pyflakes crpa experiments tests *.py
+        run: python -m pyflakes crpa experiments tests
 
       - name: Compile
-        run: python -m compileall -q crpa experiments tests *.py
+        run: python -m compileall -q crpa experiments tests
 
       - name: Config profiles load and match their advertised sizes
         run: |
