@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "CRPA Audit: Structural Attention Overlap vs. Intervention Sensitivity in Sparse Attention"
+type: software
+authors:
+  - family-names: "Basavaraj"
+    given-names: "R M"
+    orcid: "https://orcid.org/0009-0002-4758-0965"
+version: "1.0.0"
+date-released: "2026-11-22"
+license: MIT
+keywords:
+  - sparse attention
+  - long-context transformers
+  - intervention analysis
+  - measurement reliability
+  - negative results
