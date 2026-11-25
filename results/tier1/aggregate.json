@@ -1,0 +1,333 @@
+{
+  "experiment": "tier1_multiseed",
+  "measured_chance_floor": {
+    "uniform": 4.95,
+    "context_value": 52.75,
+    "last_value": 51.65,
+    "strongest": 52.75,
+    "n_simulated": 2000.0
+  },
+  "runs_dropped_for_budget_mismatch": 9,
+  "variants": {
+    "crpa_contribution": {
+      "label": "CRPA contribution-gated",
+      "seeds": [
+        42,
+        1337,
+        2024
+      ],
+      "n_runs": 3,
+      "statuses": [
+        "completed"
+      ],
+      "measured_chance_floor": 52.75,
+      "margin_over_floor_pp": -48.44444444444444,
+      "beats_floor": false,
+      "retrieval_accuracy": {
+        "mean": 4.305555555555556,
+        "std": 1.6839382851364084,
+        "n": 3,
+        "ci_low": 3.3333333333333335,
+        "ci_high": 6.25
+      },
+      "realized_overlap": {
+        "mean": 0.22230533541490635,
+        "std": 0.010749562458544604,
+        "n": 3,
+        "ci_low": 0.21316525960961977,
+        "ci_high": 0.23414843001713356
+      },
+      "eval_loss": {
+        "mean": 6.807904450098673,
+        "std": 0.13113888266434426,
+        "n": 3,
+        "ci_low": 6.704725408554078,
+        "ci_high": 6.955478191375732
+      },
+      "eval_ppl": {
+        "mean": 910.2696721857556,
+        "std": 122.55704945420335,
+        "n": 3,
+        "ci_low": 816.2538592092783,
+        "ci_high": 1048.8799834115287
+      },
+      "calibration_loss": {
+        "mean": 6.7691348393758135,
+        "std": 0.12855778920459054,
+        "n": 3,
+        "ci_low": 6.693741798400879,
+        "ci_high": 6.917574405670166
+      },
+      "calibration_ppl": {
+        "mean": 875.4797167027999,
+        "std": 116.38709135705699,
+        "n": 3,
+        "ci_low": 807.3375015705313,
+        "ci_high": 1009.8674924861684
+      },
+      "chance_accuracy": {
+        "mean": 5.0,
+        "std": 0.0,
+        "n": 3,
+        "ci_low": 5.0,
+        "ci_high": 5.0
+      }
+    },
+    "crpa_naive": {
+      "label": "CRPA naive reg.",
+      "seeds": [
+        42,
+        1337,
+        2024
+      ],
+      "n_runs": 3,
+      "statuses": [
+        "completed"
+      ],
+      "measured_chance_floor": 52.75,
+      "margin_over_floor_pp": -48.166666666666664,
+      "beats_floor": false,
+      "retrieval_accuracy": {
+        "mean": 4.583333333333333,
+        "std": 0.8333333333333335,
+        "n": 3,
+        "ci_low": 3.75,
+        "ci_high": 5.416666666666667
+      },
+      "realized_overlap": {
+        "mean": 0.2643813869605462,
+        "std": 0.032667736933917765,
+        "n": 3,
+        "ci_low": 0.24067430042972168,
+        "ci_high": 0.301644801783065
+      },
+      "eval_loss": {
+        "mean": 6.821605364481608,
+        "std": 0.15046497907798445,
+        "n": 3,
+        "ci_low": 6.702212333679199,
+        "ci_high": 6.9906119346618665
+      },
+      "eval_ppl": {
+        "mean": 924.5467740312616,
+        "std": 143.211809257068,
+        "n": 3,
+        "ci_low": 814.2051275304688,
+        "ci_high": 1086.3860701136218
+      },
+      "calibration_loss": {
+        "mean": 6.784040292104085,
+        "std": 0.14900353957652535,
+        "n": 3,
+        "ci_low": 6.6925048828125,
+        "ci_high": 6.955974578857422
+      },
+      "calibration_ppl": {
+        "mean": 890.3699328366356,
+        "std": 137.7987268632202,
+        "n": 3,
+        "ci_low": 806.3395105723079,
+        "ci_high": 1049.400763548766
+      },
+      "chance_accuracy": {
+        "mean": 5.0,
+        "std": 0.0,
+        "n": 3,
+        "ci_low": 5.0,
+        "ci_high": 5.0
+      }
+    },
+    "crpa_noreg": {
+      "label": "CRPA no reg.",
+      "seeds": [
+        42,
+        1337,
+        2024
+      ],
+      "n_runs": 3,
+      "statuses": [
+        "completed"
+      ],
+      "measured_chance_floor": 52.75,
+      "margin_over_floor_pp": -48.30555555555556,
+      "beats_floor": false,
+      "retrieval_accuracy": {
+        "mean": 4.444444444444444,
+        "std": 1.2729376930432887,
+        "n": 3,
+        "ci_low": 3.3333333333333335,
+        "ci_high": 5.833333333333333
+      },
+      "realized_overlap": {
+        "mean": 0.2435480332415965,
+        "std": 0.011134454155527078,
+        "n": 3,
+        "ci_low": 0.2327570142224431,
+        "ci_high": 0.2549967650944988
+      },
+      "eval_loss": {
+        "mean": 6.812694072723389,
+        "std": 0.14067374565295152,
+        "n": 3,
+        "ci_low": 6.712666130065917,
+        "ci_high": 6.973545360565185
+      },
+      "eval_ppl": {
+        "mean": 915.4739252978161,
+        "std": 133.1137567398508,
+        "n": 3,
+        "ci_low": 822.761306507679,
+        "ci_high": 1068.0025002390348
+      },
+      "calibration_loss": {
+        "mean": 6.774731477101644,
+        "std": 0.14141245626704452,
+        "n": 3,
+        "ci_low": 6.682981967926025,
+        "ci_high": 6.93758487701416
+      },
+      "calibration_ppl": {
+        "mean": 881.4448202732237,
+        "std": 129.1630654582145,
+        "n": 3,
+        "ci_low": 798.6972540762623,
+        "ci_high": 1030.2789574327376
+      },
+      "chance_accuracy": {
+        "mean": 5.0,
+        "std": 0.0,
+        "n": 3,
+        "ci_low": 5.0,
+        "ci_high": 5.0
+      }
+    },
+    "dense": {
+      "label": "Dense Transformer",
+      "seeds": [
+        42,
+        1337,
+        2024
+      ],
+      "n_runs": 3,
+      "statuses": [
+        "completed"
+      ],
+      "measured_chance_floor": 52.75,
+      "margin_over_floor_pp": 0.8611111111111072,
+      "beats_floor": true,
+      "retrieval_accuracy": {
+        "mean": 53.61111111111111,
+        "std": 1.7347216662217781,
+        "n": 3,
+        "ci_low": 51.666666666666664,
+        "ci_high": 55.0
+      },
+      "realized_overlap": {
+        "mean": 0.4028477558038301,
+        "std": 0.020772422316811787,
+        "n": 3,
+        "ci_low": 0.38078764112045366,
+        "ci_high": 0.4220329976330201
+      },
+      "eval_loss": {
+        "mean": 6.5946151097615555,
+        "std": 0.061366862200754144,
+        "n": 3,
+        "ci_low": 6.547157573699951,
+        "ci_high": 6.6639150142669665
+      },
+      "eval_ppl": {
+        "mean": 732.0742728861718,
+        "std": 45.54104414717855,
+        "n": 3,
+        "ci_low": 697.2594458438501,
+        "ci_high": 783.6127948792997
+      },
+      "calibration_loss": {
+        "mean": 6.595769087473552,
+        "std": 0.10765280549095632,
+        "n": 3,
+        "ci_low": 6.495584964752197,
+        "ci_high": 6.709590911865234
+      },
+      "calibration_ppl": {
+        "mean": 734.8410730481819,
+        "std": 79.78130380621394,
+        "n": 3,
+        "ci_low": 662.21148240853,
+        "ci_high": 820.2350223914509
+      },
+      "chance_accuracy": {
+        "mean": 5.0,
+        "std": 0.0,
+        "n": 3,
+        "ci_low": 5.0,
+        "ci_high": 5.0
+      }
+    },
+    "sliding": {
+      "label": "Sliding Window",
+      "seeds": [
+        42,
+        1337,
+        2024
+      ],
+      "n_runs": 3,
+      "statuses": [
+        "completed"
+      ],
+      "measured_chance_floor": 52.75,
+      "margin_over_floor_pp": -5.527777777777779,
+      "beats_floor": false,
+      "retrieval_accuracy": {
+        "mean": 47.22222222222222,
+        "std": 7.025911038856523,
+        "n": 3,
+        "ci_low": 39.166666666666664,
+        "ci_high": 52.083333333333336
+      },
+      "realized_overlap": {
+        "mean": 0.32232696107692194,
+        "std": 0.014424407884688623,
+        "n": 3,
+        "ci_low": 0.3131929102043311,
+        "ci_high": 0.3389559257775545
+      },
+      "eval_loss": {
+        "mean": 6.856401904424032,
+        "std": 0.07706606782256131,
+        "n": 3,
+        "ci_low": 6.7705873489379895,
+        "ci_high": 6.919707107543945
+      },
+      "eval_ppl": {
+        "mean": 951.8051137284357,
+        "std": 72.15898838695398,
+        "n": 3,
+        "ci_low": 871.8238084278488,
+        "ci_high": 1012.0235370626006
+      },
+      "calibration_loss": {
+        "mean": 6.856953144073486,
+        "std": 0.09217672579528563,
+        "n": 3,
+        "ci_low": 6.796847343444824,
+        "ci_high": 6.963078498840332
+      },
+      "calibration_ppl": {
+        "mean": 953.2070524311235,
+        "std": 90.0094342646139,
+        "n": 3,
+        "ci_low": 895.0211447768957,
+        "ci_high": 1056.8821647780612
+      },
+      "chance_accuracy": {
+        "mean": 5.0,
+        "std": 0.0,
+        "n": 3,
+        "ci_low": 5.0,
+        "ci_high": 5.0
+      }
+    }
+  }
+}
